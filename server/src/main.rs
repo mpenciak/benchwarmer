@@ -2,6 +2,7 @@ use std::{net::SocketAddr, sync::Arc};
 
 use axum::{
     Router,
+    extract::DefaultBodyLimit,
     routing::{get, post},
 };
 use tower_http::trace::TraceLayer;
@@ -40,6 +41,7 @@ async fn main() {
             "/{org}/{repo}/{commit}/report/pr",
             get(routes::get_report_pr),
         )
+        .layer(DefaultBodyLimit::max(100 * 1024 * 1024)) // 100MB
         .layer(TraceLayer::new_for_http())
         .with_state(storage);
 
