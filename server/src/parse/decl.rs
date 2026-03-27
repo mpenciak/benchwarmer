@@ -1,3 +1,5 @@
+use std::fmt::{Display, Formatter};
+
 use serde::Serialize;
 use winnow::{
     Parser, Result as PResult,
@@ -24,17 +26,19 @@ pub struct LeanDeclHeader {
     pub result_type: Option<String>,
 }
 
-impl ToString for LeanDeclHeader {
+impl Display for LeanDeclHeader {
     /// A concise display string, e.g. `"theorem schnorr_complete"` or `"instance : NeZero q"`.
-    fn to_string(&self) -> String {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         if self.keyword == "instance" {
-            format!(
+            write!(
+                f,
                 "{} {}",
                 self.keyword,
                 self.result_type.as_deref().unwrap_or(": <unknown>"),
             )
         } else {
-            format!(
+            write!(
+                f,
                 "{} {}",
                 self.keyword,
                 self.name.as_deref().unwrap_or("<anonymous>"),
