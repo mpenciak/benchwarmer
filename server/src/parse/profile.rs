@@ -152,10 +152,10 @@ pub fn parse_profile(source_file: &str, content: &str) -> ProfileReport {
         let Some(entry) = parse_line(line) else {
             // Continuation line: append to the most recent entry's description
             let trimmed = line.trim();
-            if !trimmed.is_empty() {
-                if let Some((_, parent)) = stack.last_mut() {
-                    parent.description.append_line(trimmed);
-                }
+            if !trimmed.is_empty()
+                && let Some((_, parent)) = stack.last_mut()
+            {
+                parent.description.append_line(trimmed);
             }
             continue;
         };
@@ -271,7 +271,9 @@ mod tests {
         let entry = parse_line(line).unwrap();
         assert_eq!(entry.category, "Elab.async");
         assert_eq!(entry.elapsed_secs, 0.027186);
-        assert!(matches!(&entry.description, ProfileDescription::Simple(s) if s == "elaborating proof of foo"));
+        assert!(
+            matches!(&entry.description, ProfileDescription::Simple(s) if s == "elaborating proof of foo")
+        );
         assert_eq!(entry.depth, 0);
     }
 

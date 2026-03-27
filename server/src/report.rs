@@ -63,20 +63,20 @@ pub(crate) fn generate_report(extracted_dir: &Path) -> BenchmarkReport {
     // Parse all profile files
     let mut profiles = Vec::new();
     let profile_dir = base.join("profiles");
-    if profile_dir.exists() {
-        if let Ok(entries) = std::fs::read_dir(&profile_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().and_then(|e| e.to_str()) == Some("profile") {
-                    let source_file = path
-                        .file_stem()
-                        .map(|s| s.to_string_lossy().replace("__", "/"))
-                        .unwrap_or_default();
+    if profile_dir.exists()
+        && let Ok(entries) = std::fs::read_dir(&profile_dir)
+    {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) == Some("profile") {
+                let source_file = path
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().replace("__", "/"))
+                    .unwrap_or_default();
 
-                    if let Ok(content) = std::fs::read_to_string(&path) {
-                        let report = profile::parse_profile(&source_file, &content);
-                        profiles.push(report);
-                    }
+                if let Ok(content) = std::fs::read_to_string(&path) {
+                    let report = profile::parse_profile(&source_file, &content);
+                    profiles.push(report);
                 }
             }
         }
