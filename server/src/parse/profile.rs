@@ -1,5 +1,71 @@
 use serde::Serialize;
 
+use crate::parse::decl::{LeanDeclHeader, parse_lean_decl};
+
+/// A structured representation of a profile description, which may be a
+/// DeclHeader or a simple string.
+#[derive(Debug, Clone, Serialize)]
+pub enum ProfileDescription {
+    DeclHeader(LeanDeclHeader),
+    Simple(String),
+}
+
+impl ProfileDescription {
+    /// Returns `true` if the description has no content.
+    pub fn is_empty(&self) -> bool {
+        match self {
+            ProfileDescription::DeclHeader(_) => false,
+            ProfileDescription::Simple(s) => s.is_empty(),
+        }
+    }
+
+    /// Append a continuation line to the description text.
+    /// Only meaningful for `Simple` variants (continuation lines are collected
+    /// before we attempt structured parsing).
+    pub fn append_line(&mut self, line: &str) {
+        match self {
+            ProfileDescription::Simple(s) => {
+                if s.is_empty() {
+                    *s = line.to_string();
+                } else {
+                    s.push('\n');
+                    s.push_str(line);
+                }
+            }
+            ProfileDescription::DeclHeader(_) => {}
+        }
+    }
+
+    /// Return a display-ready string for this description.
+    ///
+    /// For `DeclHeader` descriptions (typically from `Elab.command` entries) the
+    /// concise `keyword name` form is returned (e.g. `"theorem schnorr_complete"`).
+    /// For `Simple` descriptions (typically `Elab.async` proof elaborations) the
+    /// elaboration prefix and doc comments are stripped, leaving just the name.
+    pub fn display_string(&self) -> String {
+        match self {
+            ProfileDescription::DeclHeader(h) => h.to_string(),
+            ProfileDescription::Simple(s) => sanitize_description(s),
+        }
+    }
+
+    /// Try to upgrade a `Simple` description to a `DeclHeader` by running
+    /// the Lean declaration parser. Returns the description unchanged if
+    /// parsing fails or it is already a `DeclHeader`.
+    fn try_upgrade(&mut self) {
+        if let ProfileDescription::Simple(s) = self {
+            // Strip "elaborating (proof of)" prefix before attempting parse
+            let raw = s
+                .strip_prefix("elaborating proof of ")
+                .or_else(|| s.strip_prefix("elaborating "))
+                .unwrap_or(s);
+            if let Some(header) = parse_lean_decl(raw) {
+                *self = ProfileDescription::DeclHeader(header);
+            }
+        }
+    }
+}
+
 /// A single profiler entry from a Lean trace.profiler output.
 ///
 /// Top-level entries represent declarations. Each may have nested children
@@ -11,7 +77,7 @@ pub struct ProfileEntry {
     /// Elapsed time in seconds
     pub elapsed_secs: f64,
     /// The description text after the time
-    pub description: String,
+    pub description: ProfileDescription,
     /// Nesting depth (0 = top-level declaration)
     pub depth: usize,
     /// Child entries (for hierarchical representation)
@@ -65,7 +131,7 @@ fn parse_line(line: &str) -> Option<ProfileEntry> {
     Some(ProfileEntry {
         category,
         elapsed_secs,
-        description,
+        description: ProfileDescription::Simple(description),
         depth,
         children: Vec::new(),
     })
@@ -88,12 +154,7 @@ pub fn parse_profile(source_file: &str, content: &str) -> ProfileReport {
             let trimmed = line.trim();
             if !trimmed.is_empty() {
                 if let Some((_, parent)) = stack.last_mut() {
-                    if parent.description.is_empty() {
-                        parent.description = trimmed.to_string();
-                    } else {
-                        parent.description.push('\n');
-                        parent.description.push_str(trimmed);
-                    }
+                    parent.description.append_line(trimmed);
                 }
             }
             continue;
@@ -127,16 +188,19 @@ pub fn parse_profile(source_file: &str, content: &str) -> ProfileReport {
         }
     }
 
+    // Post-process: attempt to upgrade top-level descriptions to structured DeclHeaders
+    for decl in &mut declarations {
+        decl.description.try_upgrade();
+    }
+
     ProfileReport {
         source_file: source_file.to_string(),
         declarations,
     }
 }
 
-/// Clean up a description for display in a markdown table row.
-///
-/// Strips "elaborating (proof of)" prefixes, removes Lean doc comments (`/-- ... -/`),
-/// and takes only the first remaining line.
+/// Strip elaboration prefixes, doc comments, and excess lines from a raw
+/// description string, leaving just the bare declaration name.
 fn sanitize_description(desc: &str) -> String {
     let desc = desc
         .strip_prefix("elaborating proof of ")
@@ -174,6 +238,10 @@ fn sanitize_description(desc: &str) -> String {
 }
 
 /// Extract only declaration-level data (no children) for summary reporting.
+///
+/// For `DeclHeader` descriptions the concise `ToString` representation is used
+/// (e.g. `"theorem schnorr_complete"`). For `Simple` descriptions the
+/// sanitisation logic strips elaboration prefixes to leave just the name.
 pub(crate) fn declaration_summary(report: &ProfileReport) -> Vec<DeclarationSummary> {
     report
         .declarations
@@ -181,7 +249,7 @@ pub(crate) fn declaration_summary(report: &ProfileReport) -> Vec<DeclarationSumm
         .map(|d| DeclarationSummary {
             category: d.category.clone(),
             elapsed_secs: d.elapsed_secs,
-            description: sanitize_description(&d.description),
+            description: d.description.display_string(),
         })
         .collect()
 }
@@ -203,7 +271,7 @@ mod tests {
         let entry = parse_line(line).unwrap();
         assert_eq!(entry.category, "Elab.async");
         assert_eq!(entry.elapsed_secs, 0.027186);
-        assert_eq!(entry.description, "elaborating proof of foo");
+        assert!(matches!(&entry.description, ProfileDescription::Simple(s) if s == "elaborating proof of foo"));
         assert_eq!(entry.depth, 0);
     }
 
@@ -262,40 +330,94 @@ mod tests {
         let report = parse_profile("test.profile", content);
         let elab_step = &report.declarations[0].children[0].children[0];
         assert_eq!(elab_step.category, "Elab.step");
-        assert_eq!(
-            elab_step.description,
-            "unfold some.long.name\nsimp [spec_ok]"
+        assert!(matches!(
+            &elab_step.description,
+            ProfileDescription::Simple(s) if s == "unfold some.long.name\nsimp [spec_ok]"
+        ));
+    }
+
+    #[test]
+    fn test_decl_header_upgrade_for_top_level() {
+        // Top-level entries whose description is a recognisable Lean declaration
+        // should be upgraded to DeclHeader after parsing.
+        let content = "\
+[Elab.async] [0.050000] elaborating /-- Doc. -/\n    theorem schnorr_complete : T
+  [Elab.definition.value] [0.049000] schnorr_complete
+";
+        let report = parse_profile("test.profile", content);
+        let desc = &report.declarations[0].description;
+        assert!(
+            matches!(desc, ProfileDescription::DeclHeader(h) if h.keyword == "theorem"),
+            "expected DeclHeader, got {:?}",
+            desc,
         );
     }
 
     #[test]
-    fn test_sanitize_strips_doc_comment() {
-        let desc = "/-- The Schnorr identification protocol as a sigma protocol. -/\ndef SchnorrProtocol : SigmaProtocol where";
-        assert_eq!(sanitize_description(desc), "def SchnorrProtocol : SigmaProtocol where");
+    fn test_simple_description_stays_simple() {
+        // Descriptions that are not valid Lean declarations remain Simple.
+        let content = "[Elab.async] [0.010000] running linters\n";
+        let report = parse_profile("test.profile", content);
+        assert!(matches!(
+            &report.declarations[0].description,
+            ProfileDescription::Simple(s) if s == "running linters"
+        ));
     }
 
     #[test]
-    fn test_sanitize_strips_elaborating_prefix() {
+    fn test_declaration_summary_uses_display_string() {
+        let content = "\
+[Elab.async] [0.027186] elaborating def myFun : T
+  [Elab.definition.value] [0.026738] myFun
+";
+        let report = parse_profile("test.profile", content);
+        let summary = declaration_summary(&report);
+        assert_eq!(summary.len(), 1);
+        assert_eq!(summary[0].description, "def myFun");
+    }
+
+    #[test]
+    fn test_declaration_summary_simple_fallback() {
+        let content = "\
+[Elab.async] [0.027186] running linters
+";
+        let report = parse_profile("test.profile", content);
+        let summary = declaration_summary(&report);
+        assert_eq!(summary.len(), 1);
+        assert_eq!(summary[0].description, "running linters");
+    }
+
+    #[test]
+    fn test_declaration_summary_strips_elaborating_prefix() {
+        let content = "\
+[Elab.async] [0.027186] elaborating proof of foo.bar.baz
+";
+        let report = parse_profile("test.profile", content);
+        let summary = declaration_summary(&report);
+        assert_eq!(summary.len(), 1);
+        assert_eq!(summary[0].description, "foo.bar.baz");
+    }
+
+    #[test]
+    fn test_sanitize_description_strips_doc_comment() {
+        assert_eq!(
+            sanitize_description("/-- Doc. -/\n    theorem schnorr_complete : T"),
+            "theorem schnorr_complete : T"
+        );
+    }
+
+    #[test]
+    fn test_sanitize_description_strips_elaborating_prefix() {
         assert_eq!(sanitize_description("elaborating proof of foo"), "foo");
         assert_eq!(sanitize_description("elaborating bar"), "bar");
     }
 
     #[test]
-    fn test_sanitize_multiline_no_doc_comment() {
+    fn test_sanitize_description_first_line_only() {
         let desc = "variable (g : G) (hord : orderOf g = q)\n(hcard : Fintype.card G = q)";
-        assert_eq!(sanitize_description(desc), "variable (g : G) (hord : orderOf g = q)");
-    }
-
-    #[test]
-    fn test_declaration_summary() {
-        let content = "\
-[Elab.async] [0.027186] elaborating proof of foo
-  [Elab.definition.value] [0.026738] foo
-[Elab.async] [0.096688] elaborating proof of bar
-";
-        let report = parse_profile("test.profile", content);
-        let summary = declaration_summary(&report);
-        assert_eq!(summary.len(), 2);
-        assert_eq!(summary.len(), 2);
+        assert_eq!(
+            sanitize_description(desc),
+            "variable (g : G) (hord : orderOf g = q)"
+        );
     }
 }
