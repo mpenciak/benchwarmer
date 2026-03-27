@@ -31,7 +31,7 @@ The server stores artifacts at `$(BENCHWARMER_DATA_DIR)/<org>/<repo>/<commit>/<r
 Make sure the three workflows are available to the repository: `bench-pr.yml`, `bench-main.yml`, 
 `bench-weekly.yml`. Also ensure that `./runner/bench.sh` is available.
 
-Repository variables and secrets are required fo
+Repository variables and secrets are required for posting the benchmarks:
 
 #### Secrets
 
