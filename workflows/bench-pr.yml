@@ -82,7 +82,7 @@ jobs:
           BASE_SHA=${{ steps.pr.outputs.base_sha }}
           REPORT_URL="${{ secrets.BENCH_API_ENDPOINT }}/${REPO_NAME}/${HEAD_SHA}/report/pr?base=${BASE_SHA}"
 
-          RESPONSE=$(curl -s --show-error -w "\nHTTP_STATUS:%{http_code}" "$REPORT_URL")
+          RESPONSE=$(curl -s --max-time 300 --show-error -w "\nHTTP_STATUS:%{http_code}" "$REPORT_URL")
           HTTP_STATUS=$(echo "$RESPONSE" | tail -1 | sed 's/HTTP_STATUS://')
           BODY=$(echo "$RESPONSE" | sed '$d')
 
