@@ -7,7 +7,7 @@ edition = "2024"
 axum = "0.8"
 tokio = { version = "1", features = ["full"] }
 tower = "0.5"
-tower-http = { version = "0.6", features = ["trace"] }
+tower-http = { version = "0.6", features = ["trace", "request-id", "util"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tracing = "0.1"
@@ -15,5 +15,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 flate2 = "1"
 tar = "0.4"
 tempfile = "3"
+uuid = { version = "1", features = ["v7"] }
+http = "1"
 regex = "1"
 winnow = "1.0.0"
