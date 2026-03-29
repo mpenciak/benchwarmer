@@ -1,4 +1,8 @@
-use std::{net::SocketAddr, sync::Arc};
+use std::{
+    net::SocketAddr,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use axum::{
     Router,
@@ -25,17 +29,24 @@ use benchwarmer_server::{routes, storage};
 
 #[tokio::main]
 async fn main() {
+    // Storage directory from env or default
+    let data_dir: PathBuf = PathBuf::from(
+        std::env::var("BENCHWARMER_DATA_DIR").unwrap_or_else(|_| "./data".to_string()),
+    );
+    let storage = Arc::new(storage::Storage::new(&data_dir));
+
     // Initialize tracing
+    let logging_dir = data_dir.join("logs");
+    let file_appender = tracing_appender::rolling::daily(logging_dir, "server.log");
+    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+
     tracing_subscriber::registry()
         .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
         .with(tracing_subscriber::fmt::layer())
+        .with(tracing_subscriber::fmt::layer().with_writer(non_blocking))
         .init();
 
-    // Storage directory from env or default
-    let data_dir = std::env::var("BENCHWARMER_DATA_DIR").unwrap_or_else(|_| "./data".to_string());
-    let storage = Arc::new(storage::Storage::new(&data_dir));
-
-    tracing::info!(data_dir = %data_dir, "Starting benchwarmer server");
+    tracing::info!(data_dir = %data_dir.display(), "Starting benchwarmer server");
 
     // Bind address from env or default
     let addr: SocketAddr = std::env::var("BENCHWARMER_ADDR")

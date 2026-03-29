@@ -19,3 +19,4 @@ uuid = { version = "1", features = ["v7"] }
 http = "1"
 regex = "1"
 winnow = "1.0.0"
+tracing-appender = "0.2"
