@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
 
+use tracing::instrument;
+
 /// Manages on-disk storage of benchmark artifacts.
 ///
 /// Layout: `<base_dir>/<repo_name>/<commit_hash>/<run_number>.tar.gz`
@@ -79,12 +81,14 @@ impl Storage {
     }
 
     /// Extract a tar.gz artifact to a temporary directory and return the path.
+    #[instrument(skip_all)]
     pub fn extract_artifact(&self, artifact_path: &Path) -> std::io::Result<tempfile::TempDir> {
         let tmp = tempfile::tempdir()?;
 
         let file = std::fs::File::open(artifact_path)?;
         let gz = flate2::read::GzDecoder::new(file);
         let mut archive = tar::Archive::new(gz);
+        tracing::info!("Unpacking archive");
         archive.unpack(tmp.path())?;
 
         Ok(tmp)
