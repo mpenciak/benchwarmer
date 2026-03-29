@@ -2,6 +2,7 @@ use std::fmt::Write;
 use std::path::Path;
 
 use serde::Serialize;
+use tracing::instrument;
 
 use crate::parse::{build, profile, trace};
 
@@ -28,6 +29,7 @@ pub(crate) struct BenchmarkReport {
 ///
 /// The lakeprof.log is typically at the repo root level, but since the archive
 /// is of `bench_results/`, build times come from parsing the lakeprof.log if present.
+#[instrument]
 pub(crate) fn generate_report(extracted_dir: &Path) -> BenchmarkReport {
     let bench_results = extracted_dir.join("bench_results");
     let base = if bench_results.exists() {
@@ -36,6 +38,7 @@ pub(crate) fn generate_report(extracted_dir: &Path) -> BenchmarkReport {
         extracted_dir.to_path_buf()
     };
 
+    tracing::info!("Parsing build times");
     // Parse build times from lakeprof.log if present
     let build_times = {
         let log_path = base.join("lakeprof.log");
@@ -48,6 +51,7 @@ pub(crate) fn generate_report(extracted_dir: &Path) -> BenchmarkReport {
         }
     };
 
+    tracing::info!("Parsing longest pole times");
     // Parse longest pole from trace_event
     let longest_pole = {
         let trace_path = base.join("lakeprof.trace_event");
@@ -60,6 +64,7 @@ pub(crate) fn generate_report(extracted_dir: &Path) -> BenchmarkReport {
         }
     };
 
+    tracing::info!("Profiling files");
     // Parse all profile files
     let mut profiles = Vec::new();
     let profile_dir = base.join("profiles");
@@ -103,7 +108,9 @@ fn fmt_duration(secs: f64) -> String {
 }
 
 /// Render a weekly benchmark summary as markdown.
+#[instrument(skip_all)]
 pub(crate) fn render_weekly(report: &BenchmarkReport) -> String {
+    tracing::info!("Generating markdown");
     let mut md = String::new();
 
     // Build times

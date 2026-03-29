@@ -1,4 +1,7 @@
-use std::sync::Arc;
+use std::{
+    fmt::{self, Display},
+    sync::Arc,
+};
 
 use axum::{
     Json,
@@ -8,6 +11,7 @@ use axum::{
     response::IntoResponse,
 };
 use serde::{Deserialize, Serialize};
+use tracing::instrument;
 
 use crate::{report, storage::Storage};
 
@@ -83,10 +87,12 @@ pub async fn upload_artifact(
 /// GET /:org/:repo/:commit/report/weekly
 ///
 /// Return a markdown-formatted weekly benchmark summary.
+#[instrument(skip_all)]
 pub async fn get_report_weekly(
     State(storage): State<AppState>,
     Path((org, repo, commit)): Path<(String, String, String)>,
 ) -> Result<Json<MarkdownReport>, (StatusCode, String)> {
+    tracing::info!(org = %org, repo = %repo, commit = %commit, "Generating weekly report");
     let repo_name = format!("{org}/{repo}");
     let bench_report = extract_report(&storage, &repo_name, &commit)?;
     let markdown = report::render_weekly(&bench_report);
@@ -101,11 +107,19 @@ pub struct PrReportQuery {
     pub base: String,
 }
 
+impl Display for PrReportQuery {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.base)
+    }
+}
+
+#[instrument(skip_all)]
 pub async fn get_report_pr(
     State(storage): State<AppState>,
     Path((org, repo, commit)): Path<(String, String, String)>,
     Query(query): Query<PrReportQuery>,
 ) -> Result<Json<MarkdownReport>, (StatusCode, String)> {
+    tracing::info!(org = %org, repo = %repo, commit = %commit, query = %query, "Generating pr report");
     let repo_name = format!("{org}/{repo}");
     let head_report = extract_report(&storage, &repo_name, &commit)?;
     let base_report = extract_report(&storage, &repo_name, &query.base)?;
@@ -121,11 +135,14 @@ pub struct MarkdownReport {
 /// GET /health
 ///
 /// Simple health check endpoint.
+#[instrument]
 pub async fn health() -> &'static str {
+    tracing::info!("Responding to checkhealth");
     "ok"
 }
 
 /// Helper to extract and generate a report from the latest artifact.
+#[instrument(skip(storage))]
 fn extract_report(
     storage: &Storage,
     repo: &str,
