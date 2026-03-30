@@ -9,6 +9,8 @@ use crate::parse::{build, profile, trace};
 /// Full benchmark report for a single run.
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct BenchmarkReport {
+    /// The link to include to view the trace report on perfetto
+    pub perfetto_link: String,
     /// File-by-file build times from lakeprof.log
     pub build_times: Option<build::BuildTimesReport>,
     /// Longest pole / critical path from lakeprof.trace_event
@@ -91,6 +93,7 @@ pub(crate) fn generate_report(extracted_dir: &Path) -> BenchmarkReport {
     profiles.sort_by(|a, b| a.source_file.cmp(&b.source_file));
 
     BenchmarkReport {
+        perfetto_link: String::new(),
         build_times,
         longest_pole,
         profiles,
@@ -130,6 +133,11 @@ pub(crate) fn render_weekly(report: &BenchmarkReport) -> String {
             writeln!(md, "\n*...and {} more files*\n", sorted.len() - 20).unwrap();
         }
         writeln!(md).unwrap();
+    }
+
+    // Perfetto link
+    if !report.perfetto_link.is_empty() {
+        writeln!(md, "**View in [Perfetto!]({})**\n", report.perfetto_link).unwrap();
     }
 
     // Longest pole
@@ -186,6 +194,11 @@ pub(crate) fn render_weekly(report: &BenchmarkReport) -> String {
 /// Render a PR differential report as markdown.
 pub(crate) fn render_pr(head: &BenchmarkReport, base: &BenchmarkReport) -> String {
     let mut md = String::new();
+
+    // Perfetto link
+    if !head.perfetto_link.is_empty() {
+        writeln!(md, "**View in [Perfetto!]({})**\n", head.perfetto_link).unwrap();
+    }
 
     // Build time diff
     if let (Some(head_bt), Some(base_bt)) = (&head.build_times, &base.build_times) {
