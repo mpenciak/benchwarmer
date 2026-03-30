@@ -5,11 +5,12 @@ use std::{
 
 use axum::{
     Json,
-    body::Bytes,
+    body::{Body, Bytes},
     extract::{FromRequestParts, Path, Query, State},
     http::{StatusCode, request::Parts},
-    response::IntoResponse,
+    response::{IntoResponse, Response},
 };
+use http::header;
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
 
@@ -132,6 +133,47 @@ pub struct MarkdownReport {
     pub markdown: String,
 }
 
+/// GET /:org:/:repo:/:commit:/trace
+///
+/// Return the raw `lakeprof.trace_event` json file for the given commit.
+pub async fn get_trace_file(
+    State(storage): State<AppState>,
+    Path((org, repo, commit)): Path<(String, String, String)>,
+) -> Result<Response, (StatusCode, String)> {
+    let repo_name = format!("{org}/{repo}");
+    let artifact_path = storage.latest_artifact(&repo_name, &commit).ok_or((
+        StatusCode::NOT_FOUND,
+        format!("No artifacts found for {repo_name}/{commit}"),
+    ))?;
+
+    let tmp_dir = storage.extract_artifact(&artifact_path).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to extract: {e}"),
+        )
+    })?;
+
+    let bench_results = tmp_dir.path().join("bench_results");
+    let trace_event_file = bench_results.join("lakeprof.trace_event");
+
+    let bytes = std::fs::read(&trace_event_file).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to read trace file: {e}"),
+        )
+    })?;
+
+    Ok(Response::builder()
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(bytes))
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to build response: {e}"),
+            )
+        })?)
+}
+
 /// GET /health
 ///
 /// Simple health check endpoint.
@@ -145,12 +187,12 @@ pub async fn health() -> &'static str {
 #[instrument(skip(storage))]
 fn extract_report(
     storage: &Storage,
-    repo: &str,
+    org_repo: &str,
     commit: &str,
 ) -> Result<report::BenchmarkReport, (StatusCode, String)> {
-    let artifact_path = storage.latest_artifact(repo, commit).ok_or((
+    let artifact_path = storage.latest_artifact(org_repo, commit).ok_or((
         StatusCode::NOT_FOUND,
-        format!("No artifacts found for {repo}/{commit}"),
+        format!("No artifacts found for {org_repo}/{commit}"),
     ))?;
 
     let tmp_dir = storage.extract_artifact(&artifact_path).map_err(|e| {
@@ -160,5 +202,12 @@ fn extract_report(
         )
     })?;
 
-    Ok(report::generate_report(tmp_dir.path()))
+    let mut report = report::generate_report(tmp_dir.path());
+
+    if let Ok(base_url) = std::env::var("BENCHWARMER_BASE_URL") {
+        report.perfetto_link =
+            format!("https://ui.perfetto.dev/#!/?url={base_url}/{org_repo}/{commit}/trace");
+    }
+
+    Ok(report)
 }

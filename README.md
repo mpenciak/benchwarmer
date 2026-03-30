@@ -22,7 +22,8 @@ need to be set for the running process:
 
 1. `BENCH_AUTH_TOKENS`: Comma-separated list of valid authentication tokens
 2. `BENCHWARMER_DATA_DIR` (optional, default is `./data`): Directory for storing artifacts
-3. `BENCHWARMER_ADRR` (optional, default is `0.0.0.0:3000`): Bind address for the server
+3. `BENCHWARMER_ADDR` (optional, default is `0.0.0.0:3000`): Bind address for the server
+4. `BENCHWARMER_BASE_URL` (optional): Public base URL of the server (e.g. `https://benchmark.mpenciak.net`). When set, reports include a [Perfetto UI](https://ui.perfetto.dev) link for viewing trace data.
 
 The server stores artifacts at `$(BENCHWARMER_DATA_DIR)/<org>/<repo>/<commit>/<run>.tar.gz`.
 
@@ -63,8 +64,9 @@ lake build PrimeCert
 | `POST` | `/{org}/{repo}/{commit-sha}` | Bearer token | Upload a benchmark artifact (tar.gz body) |
 | `GET` | `/{org}/{repo}/{commit-sha}/report/weekly` | No | Weekly markdown report |
 | `GET` | `/{org}/{repo}/{commit-sha}/report/pr?base={base-sha}` | No | Differential markdown report vs base commit |
+| `GET` | `/{org}/{repo}/{commit-sha}/trace` | No | Raw `lakeprof.trace_event` JSON file |
 
-Report endpoints return JSON: `{"markdown": "..."}`.
+Report endpoints return JSON: `{"markdown": "..."}`. The trace endpoint returns `application/json` and has CORS enabled for `https://ui.perfetto.dev`.
 
 ## Project Layout
 

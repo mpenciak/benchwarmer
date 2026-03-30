@@ -5,7 +5,9 @@ use axum::{
     extract::DefaultBodyLimit,
     routing::{get, post},
 };
+use http::HeaderValue;
 use tower_http::{
+    cors::CorsLayer,
     request_id::{MakeRequestId, RequestId, SetRequestIdLayer},
     trace::TraceLayer,
 };
@@ -49,6 +51,11 @@ async fn main() {
 
     tracing::info!(data_dir = %data_dir.display(), "Starting benchwarmer server");
 
+    // Set up CORS for redirecting
+    let cors = CorsLayer::new()
+        .allow_origin("https://ui.perfetto.dev".parse::<HeaderValue>().unwrap())
+        .allow_methods([http::Method::GET]);
+
     // Bind address from env or default
     let addr: SocketAddr = std::env::var("BENCHWARMER_ADDR")
         .unwrap_or_else(|_| "0.0.0.0:3000".to_string())
@@ -66,6 +73,8 @@ async fn main() {
             "/{org}/{repo}/{commit}/report/pr",
             get(routes::get_report_pr),
         )
+        .route("/{org}/{repo}/{commit}/trace", get(routes::get_trace_file))
+        .layer(cors)
         .layer(DefaultBodyLimit::max(100 * 1024 * 1024)) // 100MB
         .layer(
             TraceLayer::new_for_http().make_span_with(|request: &http::Request<_>| {
