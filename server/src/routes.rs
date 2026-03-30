@@ -163,7 +163,7 @@ pub async fn get_trace_file(
         )
     })?;
 
-    Ok(Response::builder()
+    Response::builder()
         .header(header::CONTENT_TYPE, "application/json")
         .body(Body::from(bytes))
         .map_err(|e| {
@@ -171,7 +171,7 @@ pub async fn get_trace_file(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Failed to build response: {e}"),
             )
-        })?)
+        })
 }
 
 /// GET /health
