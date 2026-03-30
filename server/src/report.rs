@@ -195,11 +195,6 @@ pub(crate) fn render_weekly(report: &BenchmarkReport) -> String {
 pub(crate) fn render_pr(head: &BenchmarkReport, base: &BenchmarkReport) -> String {
     let mut md = String::new();
 
-    // Perfetto link
-    if !head.perfetto_link.is_empty() {
-        writeln!(md, "**View in [Perfetto!]({})**\n", head.perfetto_link).unwrap();
-    }
-
     // Build time diff
     if let (Some(head_bt), Some(base_bt)) = (&head.build_times, &base.build_times) {
         let total_diff = head_bt.total_secs - base_bt.total_secs;
@@ -214,6 +209,11 @@ pub(crate) fn render_pr(head: &BenchmarkReport, base: &BenchmarkReport) -> Strin
             fmt_duration(base_bt.total_secs),
         )
         .unwrap();
+
+        // Perfetto link
+        if !head.perfetto_link.is_empty() {
+            writeln!(md, "**View in [Perfetto!]({})**\n", head.perfetto_link).unwrap();
+        }
 
         // Build a map of base durations for diffing
         let base_map: std::collections::HashMap<&str, f64> = base_bt
