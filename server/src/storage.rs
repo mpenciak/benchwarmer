@@ -1,30 +1,42 @@
-use std::path::{Path, PathBuf};
+use std::{
+    io::Error,
+    path::{Path, PathBuf},
+};
 
+use sqlx::{Pool, Sqlite};
 use tracing::instrument;
+
+use crate::db::{self, InsertRecord};
 
 /// Manages on-disk storage of benchmark artifacts.
 ///
 /// Layout: `<base_dir>/<repo_name>/<commit_hash>/<run_number>.tar.gz`
 #[derive(Clone)]
 pub struct Storage {
+    db: Pool<Sqlite>,
     base_dir: PathBuf,
 }
 
 impl Storage {
-    pub fn new(base_dir: impl Into<PathBuf>) -> Self {
+    pub fn new(base_dir: impl Into<PathBuf>, pool: Pool<Sqlite>) -> Self {
         Self {
+            db: pool,
             base_dir: base_dir.into(),
         }
     }
 
+    pub(crate) fn pool(&self) -> &Pool<Sqlite> {
+        &self.db
+    }
+
     /// Directory for a given repo + commit.
-    fn commit_dir(&self, repo: &str, commit: &str) -> PathBuf {
-        self.base_dir.join(repo).join(commit)
+    fn commit_dir(&self, org_repo: &str, commit: &str) -> PathBuf {
+        self.base_dir.join(org_repo).join(commit)
     }
 
     /// Determine the next run number for a given repo + commit.
-    fn next_run_number(&self, repo: &str, commit: &str) -> std::io::Result<u32> {
-        let dir = self.commit_dir(repo, commit);
+    fn next_run_number(&self, org_repo: &str, commit: &str) -> std::io::Result<u32> {
+        let dir = self.commit_dir(org_repo, commit);
         if !dir.exists() {
             return Ok(1);
         }
@@ -45,19 +57,27 @@ impl Storage {
     }
 
     /// Store a benchmark artifact. Returns the path it was stored at.
-    pub fn store_artifact(
+    pub async fn store_artifact(
         &self,
-        repo: &str,
-        commit: &str,
+        org: String,
+        repo: String,
+        commit_sha: String,
         data: &[u8],
     ) -> std::io::Result<PathBuf> {
-        let dir = self.commit_dir(repo, commit);
+        let org_repo = format!("{}/{}", org, repo);
+        let dir = self.commit_dir(&org_repo, &commit_sha);
         std::fs::create_dir_all(&dir)?;
 
-        let run_number = self.next_run_number(repo, commit)?;
+        let run_number = self.next_run_number(&org_repo, &commit_sha)?;
         let file_path = dir.join(format!("{run_number}.tar.gz"));
 
         std::fs::write(&file_path, data)?;
+
+        let insert_record = InsertRecord::new(org, repo, commit_sha, run_number, file_path.clone());
+        db::insert_rows(insert_record, &self.db)
+            .await
+            .map_err(Error::other)?;
+
         Ok(file_path)
     }
 

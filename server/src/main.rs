@@ -6,6 +6,7 @@ use axum::{
     routing::{get, post},
 };
 use http::HeaderValue;
+use sqlx::sqlite::SqlitePoolOptions;
 use tower_http::{
     cors::CorsLayer,
     request_id::{MakeRequestId, RequestId, SetRequestIdLayer},
@@ -31,7 +32,21 @@ async fn main() {
     let data_dir: PathBuf = PathBuf::from(
         std::env::var("BENCHWARMER_DATA_DIR").unwrap_or_else(|_| "./data".to_string()),
     );
-    let storage = Arc::new(storage::Storage::new(&data_dir));
+
+    // Set up sqlite pool
+    let db_path = data_dir.join("benchwarmer.db");
+    let db_url = format!("sqlite:{}?mode=rwc", db_path.display());
+    let pool = SqlitePoolOptions::new()
+        .max_connections(5)
+        .connect(&db_url)
+        .await
+        .expect("Failed to connect to database");
+    sqlx::migrate!("../migrations")
+        .run(&pool)
+        .await
+        .expect("Failed to run migrations");
+
+    let storage = Arc::new(storage::Storage::new(&data_dir, pool));
 
     // Initialize tracing
     let logging_dir = data_dir.join("logs");

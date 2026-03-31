@@ -1,10 +1,13 @@
-use std::fmt::Write;
+use std::fmt::{self, Write};
 use std::path::Path;
 
 use serde::Serialize;
 use tracing::instrument;
 
-use crate::parse::{build, profile, trace};
+use crate::{
+    db::{BuildTimeReport, DeclTimeReport, RunReport},
+    parse::{build, profile, trace},
+};
 
 /// Full benchmark report for a single run.
 #[derive(Debug, Clone, Serialize)]
@@ -112,200 +115,215 @@ fn fmt_duration(secs: f64) -> String {
 
 /// Render a weekly benchmark summary as markdown.
 #[instrument(skip_all)]
-pub(crate) fn render_weekly(report: &BenchmarkReport) -> String {
+pub(crate) fn render_weekly(
+    perfetto_link: Option<String>,
+    run_report: RunReport,
+    file_build_times: &[BuildTimeReport],
+    longest_pole_times: &[BuildTimeReport],
+    decl_times: &[DeclTimeReport],
+) -> Result<String, fmt::Error> {
     tracing::info!("Generating markdown");
     let mut md = String::new();
 
     // Build times
-    if let Some(bt) = &report.build_times {
-        writeln!(md, "## Build Times\n").unwrap();
-        writeln!(md, "**Total**: {}\n", fmt_duration(bt.total_secs)).unwrap();
+    writeln!(md, "## Build Times\n")?;
+    // if let Some(bt) = &report.build_times {
+    //     writeln!(md, "## Build Times\n").unwrap();
+    //     writeln!(md, "**Total**: {}\n", fmt_duration(bt.total_secs)).unwrap();
+    //
+    //     let mut sorted: Vec<_> = bt.files.iter().collect();
+    //     sorted.sort_by(|a, b| b.duration_secs.partial_cmp(&a.duration_secs).unwrap());
+    //
+    //     writeln!(md, "| Module | Duration |").unwrap();
+    //     writeln!(md, "|--------|----------|").unwrap();
+    //     for f in sorted.iter().take(20) {
+    //         writeln!(md, "| {} | {} |", f.module, fmt_duration(f.duration_secs)).unwrap();
+    //     }
+    //     if sorted.len() > 20 {
+    //         writeln!(md, "\n*...and {} more files*\n", sorted.len() - 20).unwrap();
+    //     }
+    //     writeln!(md).unwrap();
+    // }
+    //
+    // // Perfetto link
+    // if !report.perfetto_link.is_empty() {
+    //     writeln!(md, "**View in [Perfetto!]({})**\n", report.perfetto_link).unwrap();
+    // }
+    //
+    // // Longest pole
+    // if let Some(lp) = &report.longest_pole {
+    //     writeln!(md, "## Longest Build Path\n").unwrap();
+    //     writeln!(md, "**Total**: {}\n", fmt_duration(lp.total_secs)).unwrap();
+    //
+    //     writeln!(md, "| Module | Duration |").unwrap();
+    //     writeln!(md, "|--------|----------|").unwrap();
+    //     for e in &lp.entries {
+    //         writeln!(md, "| {} | {} |", e.name, fmt_duration(e.duration_secs)).unwrap();
+    //     }
+    //     writeln!(md).unwrap();
+    // }
+    //
+    // // Slowest declarations
+    // if !report.profiles.is_empty() {
+    //     writeln!(md, "## Slowest Declarations\n").unwrap();
+    //
+    //     let mut all_decls: Vec<_> = report
+    //         .profiles
+    //         .iter()
+    //         .flat_map(|p| {
+    //             profile::declaration_summary(p)
+    //                 .into_iter()
+    //                 .map(move |d| (p.source_file.clone(), d))
+    //         })
+    //         .collect();
+    //     all_decls.sort_by(|a, b| b.1.elapsed_secs.partial_cmp(&a.1.elapsed_secs).unwrap());
+    //
+    //     writeln!(md, "| File | Declaration | Duration |").unwrap();
+    //     writeln!(md, "|------|-------------|----------|").unwrap();
+    //     for (file, d) in all_decls.iter().take(20) {
+    //         writeln!(
+    //             md,
+    //             "| {} | {} | {} |",
+    //             file,
+    //             d.display_label(),
+    //             fmt_duration(d.elapsed_secs)
+    //         )
+    //         .unwrap();
+    //     }
+    //     writeln!(md).unwrap();
+    // }
 
-        let mut sorted: Vec<_> = bt.files.iter().collect();
-        sorted.sort_by(|a, b| b.duration_secs.partial_cmp(&a.duration_secs).unwrap());
-
-        writeln!(md, "| Module | Duration |").unwrap();
-        writeln!(md, "|--------|----------|").unwrap();
-        for f in sorted.iter().take(20) {
-            writeln!(md, "| {} | {} |", f.module, fmt_duration(f.duration_secs)).unwrap();
-        }
-        if sorted.len() > 20 {
-            writeln!(md, "\n*...and {} more files*\n", sorted.len() - 20).unwrap();
-        }
-        writeln!(md).unwrap();
-    }
-
-    // Perfetto link
-    if !report.perfetto_link.is_empty() {
-        writeln!(md, "**View in [Perfetto!]({})**\n", report.perfetto_link).unwrap();
-    }
-
-    // Longest pole
-    if let Some(lp) = &report.longest_pole {
-        writeln!(md, "## Longest Build Path\n").unwrap();
-        writeln!(md, "**Total**: {}\n", fmt_duration(lp.total_secs)).unwrap();
-
-        writeln!(md, "| Module | Duration |").unwrap();
-        writeln!(md, "|--------|----------|").unwrap();
-        for e in &lp.entries {
-            writeln!(md, "| {} | {} |", e.name, fmt_duration(e.duration_secs)).unwrap();
-        }
-        writeln!(md).unwrap();
-    }
-
-    // Slowest declarations
-    if !report.profiles.is_empty() {
-        writeln!(md, "## Slowest Declarations\n").unwrap();
-
-        let mut all_decls: Vec<_> = report
-            .profiles
-            .iter()
-            .flat_map(|p| {
-                profile::declaration_summary(p)
-                    .into_iter()
-                    .map(move |d| (p.source_file.clone(), d))
-            })
-            .collect();
-        all_decls.sort_by(|a, b| b.1.elapsed_secs.partial_cmp(&a.1.elapsed_secs).unwrap());
-
-        writeln!(md, "| File | Declaration | Duration |").unwrap();
-        writeln!(md, "|------|-------------|----------|").unwrap();
-        for (file, d) in all_decls.iter().take(20) {
-            writeln!(
-                md,
-                "| {} | {} | {} |",
-                file,
-                d.display_label(),
-                fmt_duration(d.elapsed_secs)
-            )
-            .unwrap();
-        }
-        writeln!(md).unwrap();
-    }
-
-    md
+    Ok(md)
 }
 
 /// Render a PR differential report as markdown.
-pub(crate) fn render_pr(head: &BenchmarkReport, base: &BenchmarkReport) -> String {
+pub(crate) fn render_pr(
+    perfetto_link: Option<String>,
+    run_report: RunReport,
+    base_report: RunReport,
+    file_build_times: &[BuildTimeReport],
+    base_file_build_times: &[BuildTimeReport],
+    longest_pole_times: &[BuildTimeReport],
+    decl_times: &[DeclTimeReport],
+) -> Result<String, fmt::Error> {
     let mut md = String::new();
 
-    // Build time diff
-    if let (Some(head_bt), Some(base_bt)) = (&head.build_times, &base.build_times) {
-        let total_diff = head_bt.total_secs - base_bt.total_secs;
-        let sign = if total_diff >= 0.0 { "+" } else { "-" };
-        writeln!(md, "## Build Times\n").unwrap();
-        writeln!(
-            md,
-            "**Total**: {} ({}{})  \n**Base**: {}\n",
-            fmt_duration(head_bt.total_secs),
-            sign,
-            fmt_duration(total_diff.abs()),
-            fmt_duration(base_bt.total_secs),
-        )
-        .unwrap();
-
-        // Perfetto link
-        if !head.perfetto_link.is_empty() {
-            writeln!(md, "**View in [Perfetto!]({})**\n", head.perfetto_link).unwrap();
-        }
-
-        // Build a map of base durations for diffing
-        let base_map: std::collections::HashMap<&str, f64> = base_bt
-            .files
-            .iter()
-            .map(|f| (f.module.as_str(), f.duration_secs))
-            .collect();
-
-        let mut diffs: Vec<_> = head_bt
-            .files
-            .iter()
-            .map(|f| {
-                let base_secs = base_map.get(f.module.as_str()).copied().unwrap_or(0.0);
-                let diff = f.duration_secs - base_secs;
-                (&f.module, f.duration_secs, diff)
-            })
-            .collect();
-        diffs.sort_by(|a, b| b.2.abs().partial_cmp(&a.2.abs()).unwrap());
-
-        // Only show files with meaningful changes
-        let significant: Vec<_> = diffs
-            .iter()
-            .filter(|(_, _, diff)| diff.abs() >= 0.5)
-            .take(20)
-            .collect();
-
-        if !significant.is_empty() {
-            writeln!(md, "| Module | Duration | Delta |").unwrap();
-            writeln!(md, "|--------|----------|-------|").unwrap();
-            for (module, dur, diff) in &significant {
-                let sign = if *diff >= 0.0 { "+" } else { "-" };
-                writeln!(
-                    md,
-                    "| {} | {} | {}{} |",
-                    module,
-                    fmt_duration(*dur),
-                    sign,
-                    fmt_duration(diff.abs())
-                )
-                .unwrap();
-            }
-            writeln!(md).unwrap();
-        }
-    }
-
-    // Longest pole diff
-    if let (Some(head_lp), Some(base_lp)) = (&head.longest_pole, &base.longest_pole) {
-        let total_diff = head_lp.total_secs - base_lp.total_secs;
-        let sign = if total_diff >= 0.0 { "+" } else { "" };
-        writeln!(md, "## Longest Build Path\n").unwrap();
-        writeln!(
-            md,
-            "**Total**: {} ({}{})  \n**Base**: {}\n",
-            fmt_duration(head_lp.total_secs),
-            sign,
-            fmt_duration(total_diff.abs()),
-            fmt_duration(base_lp.total_secs),
-        )
-        .unwrap();
-
-        writeln!(md, "| Module | Duration |").unwrap();
-        writeln!(md, "|--------|----------|").unwrap();
-        for e in &head_lp.entries {
-            writeln!(md, "| {} | {} |", e.name, fmt_duration(e.duration_secs)).unwrap();
-        }
-        writeln!(md).unwrap();
-    }
-
-    // Slowest declarations from head
-    if !head.profiles.is_empty() {
-        writeln!(md, "## Slowest Declarations\n").unwrap();
-
-        let mut all_decls: Vec<_> = head
-            .profiles
-            .iter()
-            .flat_map(|p| {
-                profile::declaration_summary(p)
-                    .into_iter()
-                    .map(move |d| (p.source_file.clone(), d))
-            })
-            .collect();
-        all_decls.sort_by(|a, b| b.1.elapsed_secs.partial_cmp(&a.1.elapsed_secs).unwrap());
-
-        writeln!(md, "| File | Declaration | Duration |").unwrap();
-        writeln!(md, "|------|-------------|----------|").unwrap();
-        for (file, d) in all_decls.iter().take(20) {
-            writeln!(
-                md,
-                "| {} | {} | {} |",
-                file,
-                d.display_label(),
-                fmt_duration(d.elapsed_secs)
-            )
-            .unwrap();
-        }
-        writeln!(md).unwrap();
-    }
-
-    md
+    // // Build time diff
+    // if let (Some(head_bt), Some(base_bt)) = (&head.build_times, &base.build_times) {
+    //     let total_diff = head_bt.total_secs - base_bt.total_secs;
+    //     let sign = if total_diff >= 0.0 { "+" } else { "-" };
+    //     writeln!(md, "## Build Times\n").unwrap();
+    //     writeln!(
+    //         md,
+    //         "**Total**: {} ({}{})  \n**Base**: {}\n",
+    //         fmt_duration(head_bt.total_secs),
+    //         sign,
+    //         fmt_duration(total_diff.abs()),
+    //         fmt_duration(base_bt.total_secs),
+    //     )
+    //     .unwrap();
+    //
+    //     // Perfetto link
+    //     if !head.perfetto_link.is_empty() {
+    //         writeln!(md, "**View in [Perfetto!]({})**\n", head.perfetto_link).unwrap();
+    //     }
+    //
+    //     // Build a map of base durations for diffing
+    //     let base_map: std::collections::HashMap<&str, f64> = base_bt
+    //         .files
+    //         .iter()
+    //         .map(|f| (f.module.as_str(), f.duration_secs))
+    //         .collect();
+    //
+    //     let mut diffs: Vec<_> = head_bt
+    //         .files
+    //         .iter()
+    //         .map(|f| {
+    //             let base_secs = base_map.get(f.module.as_str()).copied().unwrap_or(0.0);
+    //             let diff = f.duration_secs - base_secs;
+    //             (&f.module, f.duration_secs, diff)
+    //         })
+    //         .collect();
+    //     diffs.sort_by(|a, b| b.2.abs().partial_cmp(&a.2.abs()).unwrap());
+    //
+    //     // Only show files with meaningful changes
+    //     let significant: Vec<_> = diffs
+    //         .iter()
+    //         .filter(|(_, _, diff)| diff.abs() >= 0.5)
+    //         .take(20)
+    //         .collect();
+    //
+    //     if !significant.is_empty() {
+    //         writeln!(md, "| Module | Duration | Delta |").unwrap();
+    //         writeln!(md, "|--------|----------|-------|").unwrap();
+    //         for (module, dur, diff) in &significant {
+    //             let sign = if *diff >= 0.0 { "+" } else { "-" };
+    //             writeln!(
+    //                 md,
+    //                 "| {} | {} | {}{} |",
+    //                 module,
+    //                 fmt_duration(*dur),
+    //                 sign,
+    //                 fmt_duration(diff.abs())
+    //             )
+    //             .unwrap();
+    //         }
+    //         writeln!(md).unwrap();
+    //     }
+    // }
+    //
+    // // Longest pole diff
+    // if let (Some(head_lp), Some(base_lp)) = (&head.longest_pole, &base.longest_pole) {
+    //     let total_diff = head_lp.total_secs - base_lp.total_secs;
+    //     let sign = if total_diff >= 0.0 { "+" } else { "" };
+    //     writeln!(md, "## Longest Build Path\n").unwrap();
+    //     writeln!(
+    //         md,
+    //         "**Total**: {} ({}{})  \n**Base**: {}\n",
+    //         fmt_duration(head_lp.total_secs),
+    //         sign,
+    //         fmt_duration(total_diff.abs()),
+    //         fmt_duration(base_lp.total_secs),
+    //     )
+    //     .unwrap();
+    //
+    //     writeln!(md, "| Module | Duration |").unwrap();
+    //     writeln!(md, "|--------|----------|").unwrap();
+    //     for e in &head_lp.entries {
+    //         writeln!(md, "| {} | {} |", e.name, fmt_duration(e.duration_secs)).unwrap();
+    //     }
+    //     writeln!(md).unwrap();
+    // }
+    //
+    // // Slowest declarations from head
+    // if !head.profiles.is_empty() {
+    //     writeln!(md, "## Slowest Declarations\n").unwrap();
+    //
+    //     let mut all_decls: Vec<_> = head
+    //         .profiles
+    //         .iter()
+    //         .flat_map(|p| {
+    //             profile::declaration_summary(p)
+    //                 .into_iter()
+    //                 .map(move |d| (p.source_file.clone(), d))
+    //         })
+    //         .collect();
+    //     all_decls.sort_by(|a, b| b.1.elapsed_secs.partial_cmp(&a.1.elapsed_secs).unwrap());
+    //
+    //     writeln!(md, "| File | Declaration | Duration |").unwrap();
+    //     writeln!(md, "|------|-------------|----------|").unwrap();
+    //     for (file, d) in all_decls.iter().take(20) {
+    //         writeln!(
+    //             md,
+    //             "| {} | {} | {} |",
+    //             file,
+    //             d.display_label(),
+    //             fmt_duration(d.elapsed_secs)
+    //         )
+    //         .unwrap();
+    //     }
+    //     writeln!(md).unwrap();
+    // }
+    //
+    Ok(md)
 }

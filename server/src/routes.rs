@@ -14,7 +14,18 @@ use http::header;
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
 
-use crate::{report, storage::Storage};
+use crate::{
+    db,
+    report::{self},
+    storage::Storage,
+};
+
+fn db_error(e: impl Display) -> (StatusCode, String) {
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        format!("Database error: {e}"),
+    )
+}
 
 pub type AppState = Arc<Storage>;
 
@@ -67,7 +78,10 @@ pub async fn upload_artifact(
     let repo_name = format!("{org}/{repo}");
     tracing::info!(repo = %repo_name, commit = %commit, size = body.len(), "Receiving artifact upload");
 
-    match storage.store_artifact(&repo_name, &commit, &body) {
+    match storage
+        .store_artifact(org, repo, commit.clone(), &body)
+        .await
+    {
         Ok(path) => {
             tracing::info!(path = %path.display(), "Artifact stored");
             (
@@ -94,9 +108,50 @@ pub async fn get_report_weekly(
     Path((org, repo, commit)): Path<(String, String, String)>,
 ) -> Result<Json<MarkdownReport>, (StatusCode, String)> {
     tracing::info!(org = %org, repo = %repo, commit = %commit, "Generating weekly report");
-    let repo_name = format!("{org}/{repo}");
-    let bench_report = extract_report(&storage, &repo_name, &commit)?;
-    let markdown = report::render_weekly(&bench_report);
+    let org_repo = format!("{org}/{repo}");
+
+    let perfetto_link = if let Ok(base_url) = std::env::var("BENCHWARMER_BASE_URL") {
+        Some(format!(
+            "https://ui.perfetto.dev/#!/?url={base_url}/{org_repo}/{commit}/trace"
+        ))
+    } else {
+        None
+    };
+
+    let run_report = db::get_latest_run(storage.pool(), &org, &repo, &commit)
+        .await
+        .map_err(db_error)?
+        .ok_or((
+            StatusCode::NOT_FOUND,
+            format!("No runs found for {org_repo}/{commit}"),
+        ))?;
+
+    let file_build_times = db::get_build_times(storage.pool(), run_report.id, Some(20))
+        .await
+        .map_err(db_error)?;
+
+    let longest_pole_times = db::get_longest_pole(storage.pool(), run_report.id)
+        .await
+        .map_err(db_error)?;
+
+    let decl_times = db::get_declarations(storage.pool(), run_report.id, 20)
+        .await
+        .map_err(db_error)?;
+
+    let markdown = report::render_weekly(
+        perfetto_link,
+        run_report,
+        &file_build_times,
+        &longest_pole_times,
+        &decl_times,
+    )
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error reparing report: {e}"),
+        )
+    })?;
+
     Ok(Json(MarkdownReport { markdown }))
 }
 
@@ -121,10 +176,65 @@ pub async fn get_report_pr(
     Query(query): Query<PrReportQuery>,
 ) -> Result<Json<MarkdownReport>, (StatusCode, String)> {
     tracing::info!(org = %org, repo = %repo, commit = %commit, query = %query, "Generating pr report");
-    let repo_name = format!("{org}/{repo}");
-    let head_report = extract_report(&storage, &repo_name, &commit)?;
-    let base_report = extract_report(&storage, &repo_name, &query.base)?;
-    let markdown = report::render_pr(&head_report, &base_report);
+
+    let org_repo = format!("{}/{}", org, repo);
+
+    let perfetto_link = if let Ok(base_url) = std::env::var("BENCHWARMER_BASE_URL") {
+        Some(format!(
+            "https://ui.perfetto.dev/#!/?url={base_url}/{org_repo}/{commit}/trace"
+        ))
+    } else {
+        None
+    };
+
+    let run_report = db::get_latest_run(storage.pool(), &org, &repo, &commit)
+        .await
+        .map_err(db_error)?
+        .ok_or((
+            StatusCode::NOT_FOUND,
+            format!("No runs found for {org_repo}/{commit}"),
+        ))?;
+
+    let base_report = db::get_latest_run(storage.pool(), &org, &repo, &query.base)
+        .await
+        .map_err(db_error)?
+        .ok_or((
+            StatusCode::NOT_FOUND,
+            format!("No base run found for {org_repo}/{}", query.base),
+        ))?;
+
+    let file_build_times = db::get_build_times(storage.pool(), run_report.id, None)
+        .await
+        .map_err(db_error)?;
+
+    let base_file_build_times = db::get_build_times(storage.pool(), base_report.id, None)
+        .await
+        .map_err(db_error)?;
+
+    let longest_pole_times = db::get_longest_pole(storage.pool(), run_report.id)
+        .await
+        .map_err(db_error)?;
+
+    let decl_times = db::get_declarations(storage.pool(), run_report.id, 20)
+        .await
+        .map_err(db_error)?;
+
+    let markdown = report::render_pr(
+        perfetto_link,
+        run_report,
+        base_report,
+        &file_build_times,
+        &base_file_build_times,
+        &longest_pole_times,
+        &decl_times,
+    )
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error reparing report: {e}"),
+        )
+    })?;
+
     Ok(Json(MarkdownReport { markdown }))
 }
 

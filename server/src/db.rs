@@ -10,17 +10,35 @@ use crate::parse::{
     profile::{declaration_summary, parse_profile},
 };
 
-type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
-struct InsertRecord {
+pub(crate) struct InsertRecord {
     org: String,
     repo: String,
     commit_sha: String,
-    run_number: i64,
+    run_number: u32,
     archive_path: PathBuf,
 }
 
-async fn insert_rows(record: InsertRecord, pool: &sqlx::SqlitePool) -> Result<()> {
+impl InsertRecord {
+    pub(crate) fn new(
+        org: String,
+        repo: String,
+        commit_sha: String,
+        run_number: u32,
+        archive_path: PathBuf,
+    ) -> Self {
+        Self {
+            org,
+            repo,
+            commit_sha,
+            run_number,
+            archive_path,
+        }
+    }
+}
+
+pub(crate) async fn insert_rows(record: InsertRecord, pool: &sqlx::SqlitePool) -> Result<()> {
     let mut tx = pool.begin().await?;
 
     let InsertRecord {
@@ -62,10 +80,10 @@ async fn insert_run(
     org: &str,
     repo: &str,
     commit_sha: &str,
-    run_number: i64,
+    run_number: u32,
     archive_path: &Path,
-) -> Result<i64> {
-    let run_id = sqlx::query_scalar::<_, i64>(
+) -> Result<u32> {
+    let run_id = sqlx::query_scalar::<_, u32>(
         "INSERT INTO runs (org, repo, commit_sha, run_number, artifact_path)
         VALUES (?, ?, ?, ?, ?)
         RETURNING id",
@@ -84,7 +102,7 @@ async fn insert_run(
 /// Parse lakeprof.log and insert file build times. Returns total_build_secs.
 async fn insert_build_times(
     tx: &mut Transaction<'_, Sqlite>,
-    run_id: i64,
+    run_id: u32,
     bench_results: &Path,
 ) -> Result<f64> {
     let log_path = bench_results.join("lakeprof.log");
@@ -109,7 +127,7 @@ async fn insert_build_times(
 /// Parse lakeprof.trace_event and insert longest pole entries. Returns total_longest_pole_secs.
 async fn insert_longest_pole(
     tx: &mut Transaction<'_, Sqlite>,
-    run_id: i64,
+    run_id: u32,
     bench_results: &Path,
 ) -> Result<f64> {
     let trace_path = bench_results.join("lakeprof.trace_event");
@@ -134,7 +152,7 @@ async fn insert_longest_pole(
 /// Parse each .profile file and insert declaration rows.
 async fn insert_declarations(
     tx: &mut Transaction<'_, Sqlite>,
-    run_id: i64,
+    run_id: u32,
     bench_results: &Path,
 ) -> Result<()> {
     let profiles_dir = bench_results.join("profiles");
@@ -175,6 +193,103 @@ async fn insert_declarations(
     }
 
     Ok(())
+}
+
+#[derive(sqlx::FromRow)]
+pub(crate) struct RunReport {
+    pub id: u32,
+    pub total_build_secs: f64,
+    pub total_longest_pole_secs: f64,
+}
+
+pub(crate) async fn get_latest_run(
+    pool: &sqlx::SqlitePool,
+    org: &str,
+    repo: &str,
+    commit: &str,
+) -> Result<Option<RunReport>> {
+    let run_id = sqlx::query_as::<_, RunReport>(
+        "SELECT id, total_build_secs, total_longest_pole_secs
+        FROM runs
+        where org = ? AND repo = ? AND commit_sha = ?
+        ORDER BY run_number DESC
+        LIMIT 1",
+    )
+    .bind(org)
+    .bind(repo)
+    .bind(commit)
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(run_id)
+}
+
+#[derive(sqlx::FromRow)]
+pub(crate) struct BuildTimeReport {
+    pub module: String,
+    pub duration_secs: f64,
+}
+
+pub(crate) async fn get_build_times(
+    pool: &sqlx::SqlitePool,
+    run_id: u32,
+    limit: Option<u32>,
+) -> Result<Vec<BuildTimeReport>> {
+    let rows = sqlx::query_as::<_, BuildTimeReport>(
+        "SELECT module, duration_secs 
+        FROM file_build_times 
+        WHERE run_id = ? 
+        ORDER BY duration_secs DESC 
+        LIMIT ?",
+    )
+    .bind(run_id)
+    .bind(limit.map(|l| l as i64).unwrap_or(-1))
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows)
+}
+
+pub(crate) async fn get_longest_pole(
+    pool: &sqlx::SqlitePool,
+    run_id: u32,
+) -> Result<Vec<BuildTimeReport>> {
+    let rows = sqlx::query_as::<_, BuildTimeReport>(
+        "SELECT module, duration_secs FROM longest_pole_entries WHERE run_id = ?",
+    )
+    .bind(run_id)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows)
+}
+
+#[derive(sqlx::FromRow)]
+pub(crate) struct DeclTimeReport {
+    module: String,
+    declaration: String,
+    category: String,
+    elapsed_secs: f64,
+}
+
+pub(crate) async fn get_declarations(
+    pool: &sqlx::SqlitePool,
+    run_id: u32,
+    limit: u32,
+) -> Result<Vec<DeclTimeReport>> {
+    let rows = sqlx::query_as::<_, DeclTimeReport>(
+        "SELECT module, declaration, category, elapsed_secs 
+        FROM declarations 
+        WHERE run_id = ? 
+        ORDER BY elapsed_secs DESC
+        LIMIT ?",
+    )
+    .bind(run_id)
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows)
 }
 
 fn read_required(path: &Path, name: &str) -> Result<String> {
