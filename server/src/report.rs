@@ -171,16 +171,11 @@ pub(crate) fn render_weekly(report: &BenchmarkReport) -> String {
         writeln!(md, "| File | Declaration | Duration |").unwrap();
         writeln!(md, "|------|-------------|----------|").unwrap();
         for (file, d) in all_decls.iter().take(20) {
-            let label = if d.category == "Elab.async" {
-                format!("proof of {}", d.description)
-            } else {
-                d.description.clone()
-            };
             writeln!(
                 md,
                 "| {} | {} | {} |",
                 file,
-                label,
+                d.display_label(),
                 fmt_duration(d.elapsed_secs)
             )
             .unwrap();
@@ -300,16 +295,11 @@ pub(crate) fn render_pr(head: &BenchmarkReport, base: &BenchmarkReport) -> Strin
         writeln!(md, "| File | Declaration | Duration |").unwrap();
         writeln!(md, "|------|-------------|----------|").unwrap();
         for (file, d) in all_decls.iter().take(20) {
-            let label = if d.category == "Elab.async" {
-                format!("proof of {}", d.description)
-            } else {
-                d.description.clone()
-            };
             writeln!(
                 md,
                 "| {} | {} | {} |",
                 file,
-                label,
+                d.display_label(),
                 fmt_duration(d.elapsed_secs)
             )
             .unwrap();

@@ -36,15 +36,22 @@ impl ProfileDescription {
         }
     }
 
-    /// Return a display-ready string for this description.
+    /// Return just the declaration name for display.
     ///
-    /// For `DeclHeader` descriptions (typically from `Elab.command` entries) the
-    /// concise `keyword name` form is returned (e.g. `"theorem schnorr_complete"`).
-    /// For `Simple` descriptions (typically `Elab.async` proof elaborations) the
-    /// elaboration prefix and doc comments are stripped, leaving just the name.
-    pub fn display_string(&self) -> String {
+    /// For `DeclHeader` descriptions: the name (or result type for instances).
+    /// For `Simple` descriptions: the sanitized text with elaboration prefixes stripped.
+    pub fn display_name(&self) -> String {
         match self {
-            ProfileDescription::DeclHeader(h) => h.to_string(),
+            ProfileDescription::DeclHeader(h) => {
+                if h.keyword == "instance" {
+                    h.result_type
+                        .as_deref()
+                        .unwrap_or("<anonymous instance>")
+                        .to_string()
+                } else {
+                    h.name.as_deref().unwrap_or("<anonymous>").to_string()
+                }
+            }
             ProfileDescription::Simple(s) => sanitize_description(s),
         }
     }
@@ -82,6 +89,27 @@ pub struct ProfileEntry {
     pub depth: usize,
     /// Child entries (for hierarchical representation)
     pub children: Vec<ProfileEntry>,
+}
+
+impl ProfileEntry {
+    /// Map the raw profiler category + parsed description into one of
+    /// `"definition"`, `"proof"`, or `"other"`.
+    pub fn simplified_category(&self) -> &'static str {
+        match &self.description {
+            ProfileDescription::DeclHeader(h) => match h.keyword.as_str() {
+                "theorem" | "lemma" => "proof",
+                "def" | "abbrev" | "structure" | "class" | "inductive" | "instance" => "definition",
+                _ => "other",
+            },
+            ProfileDescription::Simple(_) => {
+                if self.category == "Elab.async" {
+                    "proof"
+                } else {
+                    "other"
+                }
+            }
+        }
+    }
 }
 
 /// The result of parsing a profile file.
@@ -247,9 +275,9 @@ pub(crate) fn declaration_summary(report: &ProfileReport) -> Vec<DeclarationSumm
         .declarations
         .iter()
         .map(|d| DeclarationSummary {
-            category: d.category.clone(),
+            category: d.simplified_category().to_string(),
             elapsed_secs: d.elapsed_secs,
-            description: d.description.display_string(),
+            declaration: d.description.display_name(),
         })
         .collect()
 }
@@ -258,7 +286,19 @@ pub(crate) fn declaration_summary(report: &ProfileReport) -> Vec<DeclarationSumm
 pub(crate) struct DeclarationSummary {
     pub category: String,
     pub elapsed_secs: f64,
-    pub description: String,
+    pub declaration: String,
+}
+
+impl DeclarationSummary {
+    /// Format for display: prefixes the declaration name based on category.
+    /// e.g. "proof of foo", "def bar", or just "running linters" for other.
+    pub fn display_label(&self) -> String {
+        match self.category.as_str() {
+            "proof" => format!("proof of {}", self.declaration),
+            "definition" => format!("def of {}", self.declaration),
+            _ => self.declaration.clone(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -367,7 +407,7 @@ mod tests {
     }
 
     #[test]
-    fn test_declaration_summary_uses_display_string() {
+    fn test_declaration_summary_def() {
         let content = "\
 [Elab.async] [0.027186] elaborating def myFun : T
   [Elab.definition.value] [0.026738] myFun
@@ -375,7 +415,8 @@ mod tests {
         let report = parse_profile("test.profile", content);
         let summary = declaration_summary(&report);
         assert_eq!(summary.len(), 1);
-        assert_eq!(summary[0].description, "def myFun");
+        assert_eq!(summary[0].declaration, "myFun");
+        assert_eq!(summary[0].category, "definition");
     }
 
     #[test]
@@ -386,7 +427,8 @@ mod tests {
         let report = parse_profile("test.profile", content);
         let summary = declaration_summary(&report);
         assert_eq!(summary.len(), 1);
-        assert_eq!(summary[0].description, "running linters");
+        assert_eq!(summary[0].declaration, "running linters");
+        assert_eq!(summary[0].category, "proof");
     }
 
     #[test]
@@ -397,7 +439,8 @@ mod tests {
         let report = parse_profile("test.profile", content);
         let summary = declaration_summary(&report);
         assert_eq!(summary.len(), 1);
-        assert_eq!(summary[0].description, "foo.bar.baz");
+        assert_eq!(summary[0].declaration, "foo.bar.baz");
+        assert_eq!(summary[0].category, "proof");
     }
 
     #[test]
