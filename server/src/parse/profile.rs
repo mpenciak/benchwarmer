@@ -289,18 +289,6 @@ pub(crate) struct DeclarationSummary {
     pub declaration: String,
 }
 
-impl DeclarationSummary {
-    /// Format for display: prefixes the declaration name based on category.
-    /// e.g. "proof of foo", "def bar", or just "running linters" for other.
-    pub fn display_label(&self) -> String {
-        match self.category.as_str() {
-            "proof" => format!("proof of {}", self.declaration),
-            "definition" => format!("def of {}", self.declaration),
-            _ => self.declaration.clone(),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

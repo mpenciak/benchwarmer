@@ -292,32 +292,3 @@ pub async fn health() -> &'static str {
     tracing::info!("Responding to checkhealth");
     "ok"
 }
-
-/// Helper to extract and generate a report from the latest artifact.
-#[instrument(skip(storage))]
-fn extract_report(
-    storage: &Storage,
-    org_repo: &str,
-    commit: &str,
-) -> Result<report::BenchmarkReport, (StatusCode, String)> {
-    let artifact_path = storage.latest_artifact(org_repo, commit).ok_or((
-        StatusCode::NOT_FOUND,
-        format!("No artifacts found for {org_repo}/{commit}"),
-    ))?;
-
-    let tmp_dir = storage.extract_artifact(&artifact_path).map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to extract: {e}"),
-        )
-    })?;
-
-    let mut report = report::generate_report(tmp_dir.path());
-
-    if let Ok(base_url) = std::env::var("BENCHWARMER_BASE_URL") {
-        report.perfetto_link =
-            format!("https://ui.perfetto.dev/#!/?url={base_url}/{org_repo}/{commit}/trace");
-    }
-
-    Ok(report)
-}

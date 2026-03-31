@@ -136,12 +136,13 @@ async fn insert_longest_pole(
 
     for entry in &report.entries {
         sqlx::query(
-            "INSERT INTO longest_pole_entries (run_id, module, duration_secs)
-            VALUES (?, ?, ?)",
+            "INSERT INTO longest_pole_entries (run_id, module, duration_secs, start_us)
+            VALUES (?, ?, ?, ?)",
         )
         .bind(run_id)
         .bind(&entry.name)
         .bind(entry.duration_secs)
+        .bind(entry.start_us)
         .execute(&mut **tx)
         .await?;
     }
@@ -255,7 +256,10 @@ pub(crate) async fn get_longest_pole(
     run_id: u32,
 ) -> Result<Vec<BuildTimeReport>> {
     let rows = sqlx::query_as::<_, BuildTimeReport>(
-        "SELECT module, duration_secs FROM longest_pole_entries WHERE run_id = ?",
+        "SELECT module, duration_secs 
+        FROM longest_pole_entries 
+        WHERE run_id = ?
+        ORDER BY start_us ASC",
     )
     .bind(run_id)
     .fetch_all(pool)
@@ -266,10 +270,20 @@ pub(crate) async fn get_longest_pole(
 
 #[derive(sqlx::FromRow)]
 pub(crate) struct DeclTimeReport {
-    module: String,
-    declaration: String,
-    category: String,
-    elapsed_secs: f64,
+    pub module: String,
+    pub declaration: String,
+    pub category: String,
+    pub elapsed_secs: f64,
+}
+
+impl DeclTimeReport {
+    pub(crate) fn description(&self) -> String {
+        match self.category.as_str() {
+            "proof" => format!("proof of {}", self.declaration),
+            "definition" => format!("elaborating {}", self.declaration),
+            _ => self.declaration.clone(),
+        }
+    }
 }
 
 pub(crate) async fn get_declarations(

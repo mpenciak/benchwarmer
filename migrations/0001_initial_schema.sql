@@ -28,7 +28,8 @@ CREATE TABLE longest_pole_entries (
   id INTEGER PRIMARY KEY,
   run_id INTEGER NOT NULL REFERENCES runs (id),
   module TEXT NOT NULL,
-  duration_secs REAL NOT NULL
+  duration_secs REAL NOT NULL,
+  start_us REAL NOT NULL
 );
 
 -- Top-level declaration profiling from profiles/*.profile
