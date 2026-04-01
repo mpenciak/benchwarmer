@@ -331,9 +331,16 @@ mod tests {
     /// Helper: insert a run directly and return its id.
     async fn insert_test_run(pool: &sqlx::SqlitePool) -> u32 {
         let mut tx = pool.begin().await.unwrap();
-        let id = insert_run(&mut tx, "testorg", "testrepo", "abc123", 1, Path::new("/tmp/test.tar.gz"))
-            .await
-            .unwrap();
+        let id = insert_run(
+            &mut tx,
+            "testorg",
+            "testrepo",
+            "abc123",
+            1,
+            Path::new("/tmp/test.tar.gz"),
+        )
+        .await
+        .unwrap();
         tx.commit().await.unwrap();
         id
     }
@@ -380,18 +387,27 @@ mod tests {
         let pool = test_pool().await;
         let mut tx = pool.begin().await.unwrap();
 
-        let id = insert_run(&mut tx, "myorg", "myrepo", "deadbeef", 1, Path::new("/tmp/a.tar.gz"))
-            .await
-            .unwrap();
+        let id = insert_run(
+            &mut tx,
+            "myorg",
+            "myrepo",
+            "deadbeef",
+            1,
+            Path::new("/tmp/a.tar.gz"),
+        )
+        .await
+        .unwrap();
 
         // Update totals like insert_rows does
-        sqlx::query("UPDATE runs SET total_build_secs = ?, total_longest_pole_secs = ? WHERE id = ?")
-            .bind(10.5)
-            .bind(5.0)
-            .bind(id)
-            .execute(&mut *tx)
-            .await
-            .unwrap();
+        sqlx::query(
+            "UPDATE runs SET total_build_secs = ?, total_longest_pole_secs = ? WHERE id = ?",
+        )
+        .bind(10.5)
+        .bind(5.0)
+        .bind(id)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
 
         tx.commit().await.unwrap();
 
@@ -417,12 +433,14 @@ mod tests {
             .await
             .unwrap();
 
-        sqlx::query("UPDATE runs SET total_build_secs = 0, total_longest_pole_secs = 0 WHERE id IN (?, ?)")
-            .bind(_id1)
-            .bind(id2)
-            .execute(&mut *tx)
-            .await
-            .unwrap();
+        sqlx::query(
+            "UPDATE runs SET total_build_secs = 0, total_longest_pole_secs = 0 WHERE id IN (?, ?)",
+        )
+        .bind(_id1)
+        .bind(id2)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
 
         tx.commit().await.unwrap();
 
@@ -450,13 +468,15 @@ mod tests {
 
         // Insert some build times directly
         for (module, secs) in [("A", 3.0), ("B", 1.0), ("C", 5.0)] {
-            sqlx::query("INSERT INTO file_build_times (run_id, module, duration_secs) VALUES (?, ?, ?)")
-                .bind(run_id)
-                .bind(module)
-                .bind(secs)
-                .execute(&pool)
-                .await
-                .unwrap();
+            sqlx::query(
+                "INSERT INTO file_build_times (run_id, module, duration_secs) VALUES (?, ?, ?)",
+            )
+            .bind(run_id)
+            .bind(module)
+            .bind(secs)
+            .execute(&pool)
+            .await
+            .unwrap();
         }
 
         // No limit — should come back sorted descending
