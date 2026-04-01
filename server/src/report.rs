@@ -28,7 +28,11 @@ pub(crate) fn render_weekly(
 
     // Build times
     writeln!(md, "## Build Times\n")?;
-    writeln!(md, "**Total**: {}\n", run_report.total_build_secs)?;
+    writeln!(
+        md,
+        "**Total**: {}\n",
+        fmt_duration(run_report.total_build_secs)
+    )?;
 
     writeln!(md, "| Module | Duration |")?;
     writeln!(md, "|--------|----------|")?;
@@ -48,7 +52,11 @@ pub(crate) fn render_weekly(
 
     // Longest Build Path
     writeln!(md, "## Longest Build Path\n")?;
-    writeln!(md, "**Total**: {}\n", run_report.total_longest_pole_secs)?;
+    writeln!(
+        md,
+        "**Total**: {}\n",
+        fmt_duration(run_report.total_longest_pole_secs)
+    )?;
 
     writeln!(md, "| Module | Duration |")?;
     writeln!(md, "|--------|----------|")?;
@@ -74,10 +82,9 @@ pub(crate) fn render_weekly(
             decl_info.module,
             decl_info.description(),
             fmt_duration(decl_info.elapsed_secs)
-        )
-        .unwrap();
+        )?;
     }
-    writeln!(md).unwrap();
+    writeln!(md)?;
 
     Ok(md)
 }
@@ -155,16 +162,20 @@ pub(crate) fn render_pr(
         writeln!(md, "View in [Perfetto!]({link})")?;
     }
 
-    // Longest pole
+    // Longest Build Path
     let pole_diff = run_report.total_longest_pole_secs - base_report.total_longest_pole_secs;
     let sign = if pole_diff >= 0.0 { "+" } else { "-" };
     writeln!(md, "## Longest Build Path\n")?;
     writeln!(
         md,
-        "**Total**: {} ({}{})  \n**Base**: {}\n",
+        "**Total**: {} ({}{})  \n",
         fmt_duration(run_report.total_longest_pole_secs),
         sign,
         fmt_duration(pole_diff.abs()),
+    )?;
+    writeln!(
+        md,
+        "**Base**: {}\n",
         fmt_duration(base_report.total_longest_pole_secs),
     )?;
 

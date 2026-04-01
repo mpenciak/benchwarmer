@@ -148,7 +148,7 @@ pub async fn get_report_weekly(
     .map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Error reparing report: {e}"),
+            format!("Error preparing report: {e}"),
         )
     })?;
 
@@ -231,7 +231,7 @@ pub async fn get_report_pr(
     .map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Error reparing report: {e}"),
+            format!("Error preparing report: {e}"),
         )
     })?;
 

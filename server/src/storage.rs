@@ -57,7 +57,7 @@ impl Storage {
     }
 
     /// Store a benchmark artifact. Returns the path it was stored at.
-    pub async fn store_artifact(
+    pub(crate) async fn store_artifact(
         &self,
         org: String,
         repo: String,
@@ -82,7 +82,7 @@ impl Storage {
     }
 
     /// Get the path to the latest artifact for a repo + commit, if any.
-    pub fn latest_artifact(&self, repo: &str, commit: &str) -> Option<PathBuf> {
+    pub(crate) fn latest_artifact(&self, repo: &str, commit: &str) -> Option<PathBuf> {
         let dir = self.commit_dir(repo, commit);
         std::fs::read_dir(&dir)
             .ok()?
@@ -102,7 +102,10 @@ impl Storage {
 
     /// Extract a tar.gz artifact to a temporary directory and return the path.
     #[instrument(skip_all)]
-    pub fn extract_artifact(&self, artifact_path: &Path) -> std::io::Result<tempfile::TempDir> {
+    pub(crate) fn extract_artifact(
+        &self,
+        artifact_path: &Path,
+    ) -> std::io::Result<tempfile::TempDir> {
         let tmp = tempfile::tempdir()?;
 
         let file = std::fs::File::open(artifact_path)?;
