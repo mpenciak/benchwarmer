@@ -21,3 +21,4 @@ regex = "1"
 winnow = "1.0.0"
 tracing-appender = "0.2"
 tracing-journald = "0.3"
+sqlx = { version = "0.8.6", features = ["runtime-tokio", "sqlite", "migrate", "derive"] }
