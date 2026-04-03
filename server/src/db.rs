@@ -1,5 +1,6 @@
 use std::{
-    io::Error,
+    error,
+    io::{BufRead, Error},
     path::{Path, PathBuf},
 };
 
@@ -10,7 +11,7 @@ use crate::parse::{
     profile::{declaration_summary, parse_profile},
 };
 
-type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
+type Result<T> = std::result::Result<T, Box<dyn error::Error + Send + Sync>>;
 
 pub(crate) struct InsertRecord {
     org: String,
@@ -173,11 +174,14 @@ async fn insert_declarations(
             .map(|s| s.to_string_lossy().replace("__", "."))
             .unwrap_or_default();
 
-        let Ok(content) = std::fs::read_to_string(&path) else {
+        let Ok(file) = std::fs::File::open(&path) else {
             continue;
         };
+        let lines = std::io::BufReader::new(file)
+            .lines()
+            .map_while(std::result::Result::ok);
 
-        let report = parse_profile(&path.to_string_lossy(), &content);
+        let report = parse_profile(&path.to_string_lossy(), lines);
         for decl in declaration_summary(&report) {
             sqlx::query(
                 "INSERT INTO declarations (run_id, module, declaration, category, elapsed_secs)

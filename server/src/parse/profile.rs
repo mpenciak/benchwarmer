@@ -170,14 +170,14 @@ fn parse_line(line: &str) -> Option<ProfileEntry> {
 /// Top-level entries are those with no leading indentation (depth 0).
 /// When full hierarchical parsing is desired in the future, the `children`
 /// field can be populated by tracking the depth stack.
-pub fn parse_profile(source_file: &str, content: &str) -> ProfileReport {
+pub fn parse_profile(source_file: &str, content: impl Iterator<Item = String>) -> ProfileReport {
     let mut declarations: Vec<ProfileEntry> = Vec::new();
     // Stack for building the hierarchy: (depth, entry_index_in_parent_children or declarations)
     // For now we collect flat, but structure supports hierarchy.
     let mut stack: Vec<(usize, ProfileEntry)> = Vec::new();
 
-    for line in content.lines() {
-        let Some(entry) = parse_line(line) else {
+    for line in content {
+        let Some(entry) = parse_line(&line) else {
             // Continuation line: append to the most recent entry's description
             let trimmed = line.trim();
             if !trimmed.is_empty()
@@ -322,7 +322,7 @@ mod tests {
 [Elab.async] [0.096688] elaborating proof of bar
   [Elab.definition.value] [0.095357] bar
 ";
-        let report = parse_profile("test.profile", content);
+        let report = parse_profile("test.profile", content.lines().map(String::from));
         assert_eq!(report.declarations.len(), 2);
         assert_eq!(report.declarations[0].elapsed_secs, 0.027186);
         assert_eq!(report.declarations[1].elapsed_secs, 0.096688);
@@ -342,7 +342,7 @@ mod tests {
       simp [spec_ok]
     [Elab.step] [0.001000] done
 ";
-        let report = parse_profile("test.profile", content);
+        let report = parse_profile("test.profile", content.lines().map(String::from));
         let top_level = &report.declarations[0];
         assert_eq!(top_level.children.len(), 2);
         assert_eq!(top_level.children[1].children.len(), 2);
@@ -357,7 +357,7 @@ mod tests {
           unfold some.long.name
           simp [spec_ok]
 ";
-        let report = parse_profile("test.profile", content);
+        let report = parse_profile("test.profile", content.lines().map(String::from));
         let elab_step = &report.declarations[0].children[0].children[0];
         assert_eq!(elab_step.category, "Elab.step");
         assert!(matches!(
@@ -374,7 +374,7 @@ mod tests {
 [Elab.async] [0.050000] elaborating /-- Doc. -/\n    theorem schnorr_complete : T
   [Elab.definition.value] [0.049000] schnorr_complete
 ";
-        let report = parse_profile("test.profile", content);
+        let report = parse_profile("test.profile", content.lines().map(String::from));
         let desc = &report.declarations[0].description;
         assert!(
             matches!(desc, ProfileDescription::DeclHeader(h) if h.keyword == "theorem"),
@@ -387,7 +387,7 @@ mod tests {
     fn test_simple_description_stays_simple() {
         // Descriptions that are not valid Lean declarations remain Simple.
         let content = "[Elab.async] [0.010000] running linters\n";
-        let report = parse_profile("test.profile", content);
+        let report = parse_profile("test.profile", content.lines().map(String::from));
         assert!(matches!(
             &report.declarations[0].description,
             ProfileDescription::Simple(s) if s == "running linters"
@@ -400,7 +400,7 @@ mod tests {
 [Elab.async] [0.027186] elaborating def myFun : T
   [Elab.definition.value] [0.026738] myFun
 ";
-        let report = parse_profile("test.profile", content);
+        let report = parse_profile("test.profile", content.lines().map(String::from));
         let summary = declaration_summary(&report);
         assert_eq!(summary.len(), 1);
         assert_eq!(summary[0].declaration, "myFun");
@@ -412,7 +412,7 @@ mod tests {
         let content = "\
 [Elab.async] [0.027186] running linters
 ";
-        let report = parse_profile("test.profile", content);
+        let report = parse_profile("test.profile", content.lines().map(String::from));
         let summary = declaration_summary(&report);
         assert_eq!(summary.len(), 1);
         assert_eq!(summary[0].declaration, "running linters");
@@ -424,7 +424,7 @@ mod tests {
         let content = "\
 [Elab.async] [0.027186] elaborating proof of foo.bar.baz
 ";
-        let report = parse_profile("test.profile", content);
+        let report = parse_profile("test.profile", content.lines().map(String::from));
         let summary = declaration_summary(&report);
         assert_eq!(summary.len(), 1);
         assert_eq!(summary[0].declaration, "foo.bar.baz");
