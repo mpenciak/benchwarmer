@@ -135,9 +135,10 @@ pub(crate) fn render_pr(
     diffs.sort_by(|a, b| b.2.abs().partial_cmp(&a.2.abs()).unwrap());
 
     // Only show files with meaningful changes
+    let rms = f64::sqrt(diffs.iter().map(|(_, _, f)| f * f).sum::<f64>() / diffs.len() as f64);
     let significant: Vec<_> = diffs
         .iter()
-        .filter(|(_, _, diff)| diff.abs() >= 0.5)
+        .filter(|(_, _, diff)| diff.abs() >= 1.5 * rms && diff.abs() >= 0.5)
         .take(20)
         .collect();
 
@@ -156,6 +157,7 @@ pub(crate) fn render_pr(
             )?;
         }
         writeln!(md)?;
+        writeln!(md, "and {} more...", diffs.len())?;
     }
 
     if let Some(link) = perfetto_link {
