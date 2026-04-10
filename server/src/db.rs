@@ -54,11 +54,14 @@ pub(crate) async fn insert_rows(record: InsertRecord, pool: &sqlx::SqlitePool) -
 
     // Extract the archive to a temp dir
     let temp_dir = tempfile::tempdir()?;
-    let file = std::fs::File::open(archive_path)?;
+    let file = std::fs::File::open(&archive_path)?;
     let gz = flate2::read::GzDecoder::new(file);
     let mut archive = tar::Archive::new(gz);
     archive.unpack(temp_dir.path())?;
     let bench_results = temp_dir.path().join("bench_results");
+
+    // Extract the trace_event file alongside the archive for direct serving.
+    extract_trace_event(&archive_path, &bench_results)?;
 
     let build_times = insert_build_times(&mut tx, run_id, &bench_results).await?;
     let longest_pole = insert_longest_pole(&mut tx, run_id, &bench_results).await?;
@@ -98,6 +101,20 @@ async fn insert_run(
     .await?;
 
     Ok(run_id)
+}
+
+/// Copy `lakeprof.trace_event` next to the archive as `{run_number}.trace_event`.
+fn extract_trace_event(archive_path: &Path, bench_results: &Path) -> Result<()> {
+    let trace_src = bench_results.join("lakeprof.trace_event");
+    if !trace_src.exists() {
+        tracing::warn!("No lakeprof.trace_event found in archive");
+        return Ok(());
+    }
+
+    let trace_dest = crate::utils::trace_event_path(archive_path);
+    std::fs::copy(&trace_src, &trace_dest)?;
+    tracing::info!(?trace_dest, "Extracted trace_event file");
+    Ok(())
 }
 
 /// Parse lakeprof.log and insert file build times. Returns total_build_secs.
@@ -203,6 +220,7 @@ async fn insert_declarations(
 #[derive(sqlx::FromRow)]
 pub(crate) struct RunReport {
     pub id: u32,
+    pub artifact_path: String,
     pub total_build_secs: f64,
     pub total_longest_pole_secs: f64,
 }
@@ -214,7 +232,7 @@ pub(crate) async fn get_latest_run(
     commit: &str,
 ) -> Result<Option<RunReport>> {
     let run_id = sqlx::query_as::<_, RunReport>(
-        "SELECT id, total_build_secs, total_longest_pole_secs
+        "SELECT id, artifact_path, total_build_secs, total_longest_pole_secs
         FROM runs
         where org = ? AND repo = ? AND commit_sha = ?
         ORDER BY run_number DESC
