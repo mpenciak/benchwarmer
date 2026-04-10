@@ -20,12 +20,8 @@ pub struct Storage {
 impl Storage {
     pub fn new(base_dir: impl Into<PathBuf>, pool: Pool<Sqlite>) -> Self {
         let base_dir = base_dir.into();
-        std::fs::create_dir_all(base_dir.join("tmp"))
-            .expect("Failed to create tmp directory");
-        Self {
-            db: pool,
-            base_dir,
-        }
+        std::fs::create_dir_all(base_dir.join("tmp")).expect("Failed to create tmp directory");
+        Self { db: pool, base_dir }
     }
 
     pub(crate) fn pool(&self) -> &Pool<Sqlite> {
@@ -109,7 +105,7 @@ impl Storage {
         &self,
         artifact_path: &Path,
     ) -> std::io::Result<tempfile::TempDir> {
-        let tmp = tempfile::tempdir_in(&self.base_dir.join("tmp"))?;
+        let tmp = tempfile::tempdir_in(self.base_dir.join("tmp"))?;
 
         let file = std::fs::File::open(artifact_path)?;
         let gz = flate2::read::GzDecoder::new(file);
