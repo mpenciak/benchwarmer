@@ -1,10 +1,6 @@
-use std::{
-    io::Error,
-    path::{Path, PathBuf},
-};
+use std::{io::Error, path::PathBuf};
 
 use sqlx::{Pool, Sqlite};
-use tracing::instrument;
 
 use crate::db::{self, InsertRecord};
 
@@ -78,42 +74,6 @@ impl Storage {
             .map_err(Error::other)?;
 
         Ok(file_path)
-    }
-
-    /// Get the path to the latest artifact for a repo + commit, if any.
-    pub(crate) fn latest_artifact(&self, repo: &str, commit: &str) -> Option<PathBuf> {
-        let dir = self.commit_dir(repo, commit);
-        std::fs::read_dir(&dir)
-            .ok()?
-            .flatten()
-            .filter_map(|e| {
-                let n = e
-                    .file_name()
-                    .to_string_lossy()
-                    .strip_suffix(".tar.gz")?
-                    .parse::<u32>()
-                    .ok()?;
-                Some((n, e.path()))
-            })
-            .max_by_key(|(n, _)| *n)
-            .map(|(_, path)| path)
-    }
-
-    /// Extract a tar.gz artifact to a temporary directory and return the path.
-    #[instrument(skip_all)]
-    pub(crate) fn extract_artifact(
-        &self,
-        artifact_path: &Path,
-    ) -> std::io::Result<tempfile::TempDir> {
-        let tmp = tempfile::tempdir_in(self.base_dir.join("tmp"))?;
-
-        let file = std::fs::File::open(artifact_path)?;
-        let gz = flate2::read::GzDecoder::new(file);
-        let mut archive = tar::Archive::new(gz);
-        tracing::info!("Unpacking archive");
-        archive.unpack(tmp.path())?;
-
-        Ok(tmp)
     }
 
     pub async fn clean_temp_dirs(&self) -> std::io::Result<()> {

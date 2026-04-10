@@ -250,28 +250,18 @@ pub async fn get_trace_file(
     State(storage): State<AppState>,
     Path((org, repo, commit)): Path<(String, String, String)>,
 ) -> Result<Response, (StatusCode, String)> {
-    let repo_name = format!("{org}/{repo}");
-    let artifact_path = storage.latest_artifact(&repo_name, &commit).ok_or((
-        StatusCode::NOT_FOUND,
-        format!("No artifacts found for {repo_name}/{commit}"),
-    ))?;
+    let run = db::get_latest_run(storage.pool(), &org, &repo, &commit)
+        .await
+        .map_err(db_error)?
+        .ok_or((
+            StatusCode::NOT_FOUND,
+            format!("No runs found for {org}/{repo}/{commit}"),
+        ))?;
 
-    let tmp_dir = storage.extract_artifact(&artifact_path).map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to extract: {e}"),
-        )
-    })?;
+    let trace_path = crate::utils::trace_event_path(&run.artifact_path);
 
-    let bench_results = tmp_dir.path().join("bench_results");
-    let trace_event_file = bench_results.join("lakeprof.trace_event");
-
-    let bytes = std::fs::read(&trace_event_file).map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to read trace file: {e}"),
-        )
-    })?;
+    let bytes = std::fs::read(&trace_path)
+        .map_err(|e| (StatusCode::NOT_FOUND, format!("Trace file not found: {e}")))?;
 
     Response::builder()
         .header(header::CONTENT_TYPE, "application/json")
