@@ -19,10 +19,9 @@ pub struct Storage {
 
 impl Storage {
     pub fn new(base_dir: impl Into<PathBuf>, pool: Pool<Sqlite>) -> Self {
-        Self {
-            db: pool,
-            base_dir: base_dir.into(),
-        }
+        let base_dir = base_dir.into();
+        std::fs::create_dir_all(base_dir.join("tmp")).expect("Failed to create tmp directory");
+        Self { db: pool, base_dir }
     }
 
     pub(crate) fn pool(&self) -> &Pool<Sqlite> {
@@ -106,7 +105,7 @@ impl Storage {
         &self,
         artifact_path: &Path,
     ) -> std::io::Result<tempfile::TempDir> {
-        let tmp = tempfile::tempdir()?;
+        let tmp = tempfile::tempdir_in(self.base_dir.join("tmp"))?;
 
         let file = std::fs::File::open(artifact_path)?;
         let gz = flate2::read::GzDecoder::new(file);
@@ -115,5 +114,32 @@ impl Storage {
         archive.unpack(tmp.path())?;
 
         Ok(tmp)
+    }
+
+    pub async fn clean_temp_dirs(&self) -> std::io::Result<()> {
+        let tmp_dir = self.base_dir.join("tmp");
+        if !tmp_dir.exists() {
+            return Ok(());
+        }
+
+        let one_hour_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(60 * 60);
+        let mut removed = 0u64;
+        for entry in std::fs::read_dir(&tmp_dir)?.flatten() {
+            let modified = entry.metadata()?.modified()?;
+            if modified >= one_hour_ago {
+                continue;
+            }
+
+            let path = entry.path();
+            if path.is_dir() {
+                std::fs::remove_dir_all(&path)?;
+            } else {
+                std::fs::remove_file(&path)?;
+            }
+            removed += 1;
+        }
+
+        tracing::info!(removed, "Cleaned temporary directories older than 1 hour");
+        Ok(())
     }
 }
