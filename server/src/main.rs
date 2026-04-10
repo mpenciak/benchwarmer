@@ -106,7 +106,21 @@ async fn main() {
             }),
         )
         .layer(SetRequestIdLayer::x_request_id(Id))
-        .with_state(storage);
+        .with_state(Arc::clone(&storage));
+
+    // Spawn periodic cleanup of temporary extraction directories (every 6 hours)
+    tokio::spawn({
+        async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(6 * 60 * 60));
+            interval.tick().await; // skip immediate first tick
+            loop {
+                interval.tick().await;
+                if let Err(e) = storage.clean_temp_dirs().await {
+                    tracing::error!("Temp directory cleanup failed: {e}");
+                }
+            }
+        }
+    });
 
     tracing::info!(%addr, "Listening");
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
